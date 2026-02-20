@@ -1,0 +1,81 @@
+name: Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            frontend/package.json
+            backend/package.json
+
+      # 关键步骤：Wrangler 的 build 命令会调用前端构建，先进入 frontend 目录安装依赖，否则构建会失败。
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm install
+
+      # 安装后端依赖 (包含 wrangler 等)
+      - name: Install Backend Dependencies
+        run: |
+          cd backend
+          npm install
+
+      # 动态注入 D1 数据库ID 和 数据库名称
+      - name: Inject D1 Database ID
+        env:
+          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          CLOUDFLARE_D1_DATABASE_NAME: ${{ secrets.CLOUDFLARE_D1_DATABASE_NAME || '2fauth-db' }}
+        run: |
+          # 仅替换第一个匹配到的 database_id (对应生产环境配置)，保留 dev 环境配置
+          sed -i "0,/\"database_id\":/s/\"database_id\": \".*\"/\"database_id\": \"$CLOUDFLARE_D1_DATABASE_ID\"/" backend/wrangler.jsonc
+          sed -i "0,/\"database_name\":/s/\"database_name\": \".*\"/\"database_name\": \"$CLOUDFLARE_D1_DATABASE_NAME\"/" backend/wrangler.jsonc
+
+      # 初始化或更新数据库结构 (执行 schema.sql)
+      - name: Update Database Schema
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: 'backend'
+          command: d1 execute ${{ secrets.CLOUDFLARE_D1_DATABASE_NAME || '2fauth-db' }} --remote --file=schema.sql
+
+      # 使用官方 Action 进行部署
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: 'backend'
+          # 保持与 package.json 中一致的参数，开启压缩
+          command: deploy --minify
+          secrets: |
+            OAUTH_CLIENT_ID
+            OAUTH_CLIENT_SECRET
+            OAUTH_BASE_URL
+            OAUTH_ID
+            OAUTH_REDIRECT_URI
+            ENCRYPTION_KEY
+            JWT_SECRET
+        env:
+          OAUTH_CLIENT_ID: ${{ secrets.OAUTH_CLIENT_ID }}
+          OAUTH_CLIENT_SECRET: ${{ secrets.OAUTH_CLIENT_SECRET }}
+          OAUTH_BASE_URL: ${{ secrets.OAUTH_BASE_URL || 'https://github.com' }}
+          OAUTH_ID: ${{ secrets.OAUTH_ID }}
+          OAUTH_REDIRECT_URI: ${{ secrets.OAUTH_REDIRECT_URI }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}

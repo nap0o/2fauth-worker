@@ -1,0 +1,15 @@
+{
+  "name": "backend",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev src/index.ts --env dev --host 0.0.0.0 --port 8787",
+    "deploy": "wrangler deploy --minify src/index.ts"
+  },
+  "dependencies": {
+    "hono": "^4.11.10",
+    "webdav": "^5.9.0"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

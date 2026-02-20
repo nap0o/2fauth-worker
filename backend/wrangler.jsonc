@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "2fauth-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-04-01",
+  
+  // ====== 静态资源托管 ======
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "../frontend/dist", 
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+
+  // ====== 自动构建前端 ======
+  "build": {
+    "command": "npm run build --prefix ../frontend"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "2fauth-db",
+      "database_id": "d2ca3b30-408b-4529-9f09-eb1d3ade0dd5"
+    }
+  ],
+
+  // ====== 本地开发环境配置 ======
+  "env": {
+    "dev": {
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "2fauth-db-dev",
+          "database_id": "9e591736-5dbb-4f09-8769-0270d7257731"
+        }
+      ]
+    }
+  }
+}
