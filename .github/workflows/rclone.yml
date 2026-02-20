@@ -1,0 +1,188 @@
+name: Backup D1 Database with Rclone
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  backup-process:
+    name: Secure Backup Pipeline
+    runs-on: ubuntu-latest
+    
+    # 全局环境变量映射
+    env:
+      # --- Cloudflare ---
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+      
+      # --- Encryption ---
+      BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      
+      # --- WebDAV ---
+      WEBDAV_URL: ${{ secrets.WEBDAV_URL }}
+      WEBDAV_USER: ${{ secrets.WEBDAV_USER }}
+      WEBDAV_PASSWORD: ${{ secrets.WEBDAV_PASSWORD }}
+      WEBDAV_VENDOR: ${{ secrets.WEBDAV_VENDOR || 'other' }}
+      WEBDAV_BASE_PATH: ${{ secrets.WEBDAV_BASE_PATH || '2fauth-worker' }}
+      
+      # --- Google Drive ---
+      GDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}
+      GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+      GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+      GDRIVE_ROOT_FOLDER_ID: ${{ secrets.GDRIVE_ROOT_FOLDER_ID }}
+      
+      # --- Retention Policy ---
+      RETENTION_DAYS: ${{ secrets.BACKUP_RETENTION_DAYS || 30 }}
+      
+      # --- Tool Versions (稳定性核心) ---
+      WRANGLER_VERSION: "3.57.1"
+
+    steps:
+      # STEP 1: 环境初始化 (工具安装)
+      - name: 🛠️ Setup Tools
+        uses: AnimMouse/setup-rclone@v1
+        with:
+          version: v1.66.0
+
+      # STEP 2: 配置注入与检查 (In-Memory Configuration)
+      # 这是一个关键步骤：它检查变量，并将 Rclone 配置直接写入 GitHub 环境，而不生成文件
+      - name: 🛡️ Pre-flight Check & Config Injection
+        id: config
+        run: |
+          # 初始化目标列表
+          TARGETS=""
+          
+          # --- 1. Cloudflare 核心检查 ---
+          if [[ -z "$CLOUDFLARE_ACCOUNT_ID" || -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_D1_DATABASE_ID" ]]; then
+            echo "::error::Missing Cloudflare credentials!"
+            exit 1
+          fi
+
+          # --- 2. WebDAV 动态配置 (Env Config Protocol) ---
+          if [[ -n "$WEBDAV_URL" && -n "$WEBDAV_USER" && -n "$WEBDAV_PASSWORD" ]]; then
+            echo "✅ WebDAV Detected: Enabling..."
+            TARGETS+="remote_webdav "
+            
+            # 将配置注入环境变量，Rclone 会自动识别名为 'remote_webdav' 的配置
+            echo "RCLONE_CONFIG_REMOTE_WEBDAV_TYPE=webdav" >> $GITHUB_ENV
+            echo "RCLONE_CONFIG_REMOTE_WEBDAV_URL=$WEBDAV_URL" >> $GITHUB_ENV
+            echo "RCLONE_CONFIG_REMOTE_WEBDAV_VENDOR=$WEBDAV_VENDOR" >> $GITHUB_ENV
+            echo "RCLONE_CONFIG_REMOTE_WEBDAV_USER=$WEBDAV_USER" >> $GITHUB_ENV
+            # 实时加密密码并注入
+            OBSCURED=$(rclone obscure "$WEBDAV_PASSWORD")
+            echo "RCLONE_CONFIG_REMOTE_WEBDAV_PASS=$OBSCURED" >> $GITHUB_ENV
+          fi
+
+          # --- 3. GDrive 动态配置 (Env Config Protocol) ---
+          if [[ -n "$GDRIVE_TOKEN" && -n "$GDRIVE_CLIENT_ID" && -n "$GDRIVE_CLIENT_SECRET" && -n "$GDRIVE_ROOT_FOLDER_ID" ]]; then
+            echo "✅ GDrive Detected: Enabling..."
+            TARGETS+="remote_gdrive "
+            
+            echo "RCLONE_CONFIG_REMOTE_GDRIVE_TYPE=drive" >> $GITHUB_ENV
+            echo "RCLONE_CONFIG_REMOTE_GDRIVE_SCOPE=drive" >> $GITHUB_ENV
+            echo "RCLONE_CONFIG_REMOTE_GDRIVE_TOKEN=$GDRIVE_TOKEN" >> $GITHUB_ENV
+            echo "RCLONE_CONFIG_REMOTE_GDRIVE_CLIENT_ID=$GDRIVE_CLIENT_ID" >> $GITHUB_ENV
+            echo "RCLONE_CONFIG_REMOTE_GDRIVE_CLIENT_SECRET=$GDRIVE_CLIENT_SECRET" >> $GITHUB_ENV
+            echo "RCLONE_CONFIG_REMOTE_GDRIVE_ROOT_FOLDER_ID=$GDRIVE_ROOT_FOLDER_ID" >> $GITHUB_ENV
+          fi
+
+          # --- 熔断检查 ---
+          if [[ -z "$TARGETS" ]]; then
+            echo "::error::No backup targets configured! Aborting."
+            exit 1
+          fi
+          
+          # 输出目标列表供后续使用
+          echo "BACKUP_TARGETS=$TARGETS" >> $GITHUB_ENV
+
+      # STEP 3: 数据生产 (导出、压缩、加密)
+      - name: 📦 Export & Encrypt Database
+        run: |
+          # 安装指定版本的 Wrangler
+          npm install -g wrangler@${{ env.WRANGLER_VERSION }} --quiet
+
+          # 获取数据库名称
+          DB_NAME=$(npx wrangler d1 list --json | jq -r ".[] | select(.uuid == \"$CLOUDFLARE_D1_DATABASE_ID\") | .name")
+          if [[ -z "$DB_NAME" ]]; then
+             echo "::error::Could not resolve D1 Name from UUID."
+             exit 1
+          fi
+          
+          echo "🚀 Exporting: $DB_NAME"
+          npx wrangler d1 export "$DB_NAME" --remote --output=backup.sql
+          
+          echo "🗜️ Compressing..."
+          gzip -9 backup.sql
+          
+          # 生成文件名
+          DATE=$(date +'%Y-%m-%d_%H-%M-%S')
+          
+          if [[ -n "$BACKUP_ENCRYPTION_KEY" ]]; then
+            echo "🔒 Encrypting (AES-256)..."
+            FILENAME="backup_${DATE}.sql.gz.enc"
+            openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
+              -in backup.sql.gz -out "$FILENAME" -pass pass:"$BACKUP_ENCRYPTION_KEY"
+          else
+            echo "⚠️ Encryption skipped (Key not set)"
+            FILENAME="backup_${DATE}.sql.gz"
+            mv backup.sql.gz "$FILENAME"
+          fi
+          
+          echo "FILENAME=$FILENAME" >> $GITHUB_ENV
+
+      # STEP 4: 数据分发 (故障隔离循环)
+      - name: 🚀 Distribute to Cloud
+        run: |
+          # 任何命令失败不立即退出，由逻辑控制
+          set +e 
+          
+          OVERALL_STATUS=0
+          
+          for target in $BACKUP_TARGETS; do
+            echo "---------------------------------------------------"
+            echo "📡 Processing Remote: [${target}]"
+            
+            # --- 路径策略 ---
+            if [[ "$target" == "remote_webdav" ]]; then
+              # WebDAV: 显式拼接 Base Path
+              DEST_PATH="${target}:${WEBDAV_BASE_PATH}/${FILENAME}"
+              PURGE_PATH="${target}:${WEBDAV_BASE_PATH}/"
+            else
+              # GDrive: 依赖 Root Folder ID，直接存根
+              DEST_PATH="${target}:${FILENAME}"
+              PURGE_PATH="${target}:"
+            fi
+            
+            # --- 1. 上传 ---
+            echo "   📤 Uploading..."
+            rclone --config /dev/null copyto "$FILENAME" "$DEST_PATH" --retries 3
+            
+            if [ $? -ne 0 ]; then
+              echo "::error::❌ Failed to upload to $target"
+              OVERALL_STATUS=1
+              continue # 跳过当前目标的后续步骤，继续下一个目标
+            fi
+            
+            # --- 2. 清理 ---
+            echo "   🧹 Pruning old backups (> ${RETENTION_DAYS}d)..."
+            rclone --config /dev/null delete "$PURGE_PATH" --min-age ${RETENTION_DAYS}d -v
+            
+            if [ $? -ne 0 ]; then
+               echo "::warning::⚠️ Cleanup failed for $target, but upload was successful."
+               # 清理失败不算核心失败，不修改 OVERALL_STATUS
+            fi
+            
+            echo "   ✅ Success: $target"
+          done
+          
+          echo "---------------------------------------------------"
+          
+          # 最终根据整体状态决定 Job 是否成功
+          if [ $OVERALL_STATUS -ne 0 ]; then
+            echo "::error::One or more backup targets failed."
+            exit 1
+          fi
+          
+          echo "🎉 All backup tasks completed successfully."
