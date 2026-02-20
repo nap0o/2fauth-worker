@@ -22,7 +22,7 @@
           <template #header>
             <div class="card-header"><el-icon><Download /></el-icon> <span>数据导入</span></div>
           </template>
-          <div class="card-body">
+          <div class="card-body" v-loading="isImporting && !showDecryptDialog" :element-loading-text="loadingText">
             <p class="desc">支持从各类 2FA 软件或本系统的备份文件中恢复数据。导入时会自动跳过已存在的重复账号。</p>
             <div class="import-options">
               <el-button plain @click="triggerImport('encrypted', '.json')">🔒 本系统加密备份 (.json)</el-button>
@@ -174,7 +174,7 @@ const submitImportData = async () => {
     return ElMessage.warning('请输入解密密码')
   }
 
-  loadingText.value = '正在解密并导入数据...'
+  loadingText.value = currentImportType.value === 'encrypted' ? '正在解密并导入数据...' : '正在导入数据...'
   isImporting.value = true
   try {
     const data = await request('/api/accounts/import', {

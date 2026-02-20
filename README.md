@@ -5,7 +5,7 @@
 它允许你完全掌控自己的 2FA 数据，支持多端同步、WebDAV 备份、加密导出，并且完全免费部署在 Cloudflare 的边缘网络上。
 
 > **免责声明**  
-> 本项目代码 `100%` 由 `Gemini 3.5 Pro` 生成，作者不对任何数据丢失负责。  
+> 本项目代码 `100%` 由 `Gemini 3 Pro` 生成，作者不对任何数据丢失负责。  
 
 ## ✨ 功能特性
 
@@ -47,7 +47,7 @@
 2.  填写信息：
     - **Application Name**: 2FAuth (或任意名称)
     - **Homepage URL**: `https://你的Worker子域名.workers.dev` (部署后可修改为Worker绑定的自定义域名)
-    - **Authorization callback URL**: `https://你的Worker子域名.workers.dev/api/oauth/callback` (部署后可修改为Worker绑定的自定义域名)
+    - **Authorization callback URL**: `https://你的Worker子域名.workers.dev/oauth/callback` (部署后可修改为Worker绑定的自定义域名)
 3.  创建后，保存 `Client ID` 并生成一个新的 `Client Secret`。
 
 ### 4. 配置 GitHub Secrets
