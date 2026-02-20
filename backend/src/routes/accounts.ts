@@ -142,20 +142,22 @@ accounts.post('/', async (c) => {
 // ==========================================
 accounts.put('/:id', async (c) => {
     const id = c.req.param('id');
-    const { service, category, account } = await c.req.json();
+    const { service, category, account, digits, period } = await c.req.json();
     const user = c.get('user');
 
     if (!validateServiceName(service) || !validateAccountName(account)) {
         throw new AppError('Invalid input format', 400);
     }
+    if (digits && ![6, 8].includes(digits)) throw new AppError('Invalid digits', 400);
+    if (period && ![30, 60].includes(period)) throw new AppError('Invalid period', 400);
 
     const result = await c.env.DB.prepare(
         `UPDATE accounts 
-         SET service = ?, account = ?, category = ?, updated_at = ?, updated_by = ? 
+         SET service = ?, account = ?, category = ?, digits = COALESCE(?, digits), period = COALESCE(?, period), updated_at = ?, updated_by = ? 
          WHERE id = ?`
     ).bind(
         sanitizeInput(service, 50), sanitizeInput(account, 100), category ? sanitizeInput(category, 30) : '',
-        Date.now(), user.username, id
+        digits || null, period || null, Date.now(), user.username, id
     ).run();
 
     if (!result.meta.changes) throw new AppError('Account not found', 404);

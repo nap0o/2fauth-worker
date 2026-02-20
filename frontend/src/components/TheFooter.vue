@@ -4,7 +4,7 @@
       <p>
         &copy;{{ new Date().getFullYear() }} <a href="https://github.com/nap0o/2fauth-worker" target="_blank" rel="noopener noreferrer">2FAuth</a>
         <span class="divider">|</span>
-        您的专属云端双因素认证管家
+        Serverless 2FA Manager
       </p>
     </div>
   </footer>

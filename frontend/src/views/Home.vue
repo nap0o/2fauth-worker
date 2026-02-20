@@ -162,6 +162,24 @@
                   <el-form-item label="安全密钥 (Base32格式)" prop="secret">
                     <el-input v-model="newAccount.secret" placeholder="请输入 16 位以上的安全密钥" />
                   </el-form-item>
+                  <el-row :gutter="20">
+                    <el-col :span="12">
+                      <el-form-item label="代码位数" prop="digits">
+                        <el-select v-model="newAccount.digits" style="width: 100%">
+                          <el-option label="6 位" :value="6" />
+                          <el-option label="8 位" :value="8" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                    <el-col :span="12">
+                      <el-form-item label="更新周期" prop="period">
+                        <el-select v-model="newAccount.period" style="width: 100%">
+                          <el-option label="30 秒" :value="30" />
+                          <el-option label="60 秒" :value="60" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                  </el-row>
                   <el-form-item label="分类 (可选)" prop="category">
                     <el-input v-model="newAccount.category" placeholder="如 工作, 个人" />
                   </el-form-item>
@@ -290,7 +308,7 @@ watch(searchQuery, () => {
 const submitting = ref(false)
 const addFormRef = ref(null)
 const newAccount = ref({
-  service: '', account: '', secret: '', category: ''
+  service: '', account: '', secret: '', category: '', digits: 6, period: 30
 })
 
 const rules = {
@@ -349,7 +367,7 @@ const submitAddAccount = async () => {
         })
         if (data.success) {
           ElMessage.success('账号添加成功！')
-          newAccount.value = { service: '', account: '', secret: '', category: '' }
+          newAccount.value = { service: '', account: '', secret: '', category: '', digits: 6, period: 30 }
           fetchAccounts()
           activeTab.value = 'accounts' // 自动切回列表
         }
